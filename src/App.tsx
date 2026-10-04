@@ -15,6 +15,7 @@ import {
   Sparkles,
   Layers,
   StopCircle,
+  Key,
 } from 'lucide-react';
 import {
   VOICES,
@@ -37,6 +38,8 @@ import {
 } from './utils/audioUtils';
 import { MasterPlayer } from './components/MasterPlayer';
 import { SegmentCard } from './components/SegmentCard';
+import { ApiKeyManager } from './components/ApiKeyManager';
+import { generateTtsChunk, getApiKeys } from './utils/geminiTts';
 
 export default function App() {
   // Input & configuration states
@@ -60,6 +63,15 @@ export default function App() {
 
   // Abort controller reference for cancelling generation sequence
   const abortRef = useRef(false);
+
+  // API key manager state
+  const [showKeyManager, setShowKeyManager] = useState(false);
+  const [keyCount, setKeyCount] = useState(0);
+  const [lastKeyUsed, setLastKeyUsed] = useState<string | null>(null);
+
+  useEffect(() => {
+    setKeyCount(getApiKeys().length);
+  }, []);
 
   // SSML detection & word count calculations
   const isInputSsml = useMemo(() => isSsmlText(inputText), [inputText]);
@@ -145,7 +157,7 @@ export default function App() {
     setGlobalError(null);
   };
 
-  // Core API caller for single TTS chunk
+  // Core API caller for single TTS chunk (client-side langsung ke Gemini, dengan rotasi key)
   const generateSingleChunk = async (
     textChunk: string,
     voiceName: string,
@@ -155,32 +167,20 @@ export default function App() {
     partIndex: number,
     totalParts: number
   ): Promise<{ audioBase64: string; durationSeconds: number }> => {
-    const res = await fetch('/api/tts/generate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        text: textChunk,
-        voiceName,
-        styleInstruction: styleInstr,
-        tempo: tempoInstr,
-        language: langPrompt,
-        partIndex,
-        totalParts,
-        preferredModel: 'gemini-2.5-flash-preview-tts',
-      }),
+    const result = await generateTtsChunk({
+      text: textChunk,
+      voiceName,
+      styleInstruction: styleInstr,
+      tempo: tempoInstr,
+      language: langPrompt,
+      partIndex,
+      totalParts,
     });
-
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(
-        errorData.error || `HTTP ${res.status}: Gagal memproses audio dari Gemini API`
-      );
-    }
-
-    const data = await res.json();
+    setLastKeyUsed(result.apiKeyUsed);
+    setKeyCount(getApiKeys().length);
     return {
-      audioBase64: data.audioBase64,
-      durationSeconds: data.durationSeconds || 0,
+      audioBase64: result.audioBase64,
+      durationSeconds: result.durationSeconds,
     };
   };
 
@@ -188,6 +188,12 @@ export default function App() {
   const handleGenerate = async (isAppending = false) => {
     if (!inputText.trim()) {
       setGlobalError('Masukkan teks terlebih dahulu sebelum generate audio.');
+      return;
+    }
+
+    if (getApiKeys().length === 0) {
+      setShowKeyManager(true);
+      setGlobalError('Belum ada API key. Pasang minimal satu Gemini API key dulu (gratis dari aistudio.google.com).');
       return;
     }
 
@@ -447,6 +453,20 @@ export default function App() {
                 <span className="hidden sm:inline">Reset Sesi</span>
               </button>
             )}
+            <button
+              onClick={() => { setShowKeyManager(true); setKeyCount(getApiKeys().length); }}
+              className={`px-3 py-1.5 text-xs font-medium rounded-lg border transition-colors flex items-center gap-1.5 cursor-pointer ${
+                keyCount > 0
+                  ? 'text-emerald-300 hover:text-emerald-200 hover:bg-slate-800 border-emerald-700/50 bg-emerald-900/20'
+                  : 'text-amber-300 hover:text-amber-200 hover:bg-slate-800 border-amber-600/60 bg-amber-900/20 animate-pulse'
+              }`}
+              title="Kelola Gemini API keys (multi-key + rotasi otomatis)"
+            >
+              <Key className="w-3.5 h-3.5" />
+              <span className="hidden sm:inline">
+                {keyCount > 0 ? `API Keys (${keyCount})` : 'Pasang API Key'}
+              </span>
+            </button>
           </div>
         </div>
       </header>
@@ -898,9 +918,21 @@ export default function App() {
         </div>
       </main>
 
+      {/* API Key Manager Modal */}
+      <ApiKeyManager
+        open={showKeyManager}
+        onClose={() => {
+          setShowKeyManager(false);
+          setKeyCount(getApiKeys().length);
+        }}
+      />
+
       {/* Minimal Footer */}
       <footer className="border-t border-slate-800/60 py-4 text-center text-xs text-slate-500 mt-auto">
         <p>TTS Studio • Powered by Gemini Text-to-Speech API • 24000 Hz Mono WAV</p>
+        {lastKeyUsed && (
+          <p className="mt-1 text-[10px] text-slate-600">Key terakhir dipakai: {lastKeyUsed}</p>
+        )}
       </footer>
     </div>
   );
