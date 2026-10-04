@@ -1,0 +1,8 @@
+{
+  "name": "TTS Studio",
+  "description": "Studio Text-to-Speech berbasis Gemini TTS dengan pengaturan gaya bicara, pemecah naskah otomatis, dan ekspor audio WAV.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
